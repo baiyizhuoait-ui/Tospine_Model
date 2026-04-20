@@ -1,0 +1,21 @@
+# Python virtual environments
+gpu_env/
+dev_env/
+ai_env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Training logs
+train_log.txt
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
