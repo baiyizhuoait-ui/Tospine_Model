@@ -13,7 +13,7 @@
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 运行说明：
 1. 确保 GPU 可用（需 CUDA + cuDNN + TF-GPU 版本匹配）
-   - RTX 5060 (Blackwell) 目前 TF 不支持 GPU，自动回退 CPU
+   - RTX 50系 (Blackwell) 目前 TF 不支持 GPU，自动回退 CPU
 2. 数据集路径：默认 ~/ai_study/posture_data/posture_synthetic_data/
 3. 安装依赖：~/ai_study/gpu_env/bin/pip install tensorflow pandas numpy scikit-learn matplotlib
 4. 运行：~/ai_study/gpu_env/bin/python -u ~/ai_study/train_posture_tensorflow.py
@@ -89,7 +89,7 @@ def _detect_gpu():
 
 _gpu_info = _detect_gpu()
 
-# Blackwell 架构 (sm_120 / Compute Capability 12.0) 目前 TF 不支持
+
 _FORCE_CPU = False
 if _gpu_info["compute_cap"].startswith("12."):
     _FORCE_CPU = True
