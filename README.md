@@ -6,7 +6,7 @@
 
 ## 项目简介
 
-**智能正姿衣（Smart Posture Shirt）** 是一套嵌入式体态监测方案，通过衣物上的 3 个 FSR 柔性压力传感器与 BMI160 六轴 IMU，以 50 Hz 采样率持续采集穿戴者体态数据，实时推理出坐姿状态（4 分类），通过振动反馈纠正用户不良坐姿。
+**智能正姿衣（Smart Posture Shirt）** 是一套嵌入式体态监测方案，通过衣物上的 3 个 Flex 弯曲传感器（左肩 Flex 2.2、右肩 Flex 2.2、背部 Flex 4.5）与 BMI160 六轴 IMU，以 50 Hz 采样率持续采集穿戴者体态数据，实时推理出坐姿状态（4 分类），通过振动反馈纠正用户不良坐姿。
 
 ### 姿态分类
 
@@ -27,9 +27,13 @@
 |------|------|
 | 微控制器 | ESP32-C6 (RISC-V, 160 MHz) |
 | 内存 | 512 KB SRAM / 4 MB Flash |
-| 传感器 | FSR 柔性压力 ×3 + BMI160 六轴 IMU |
+| 弯曲传感器 | Flex 2.2 ×2（左肩、右肩）+ Flex 4.5 ×1（背部） |
+| 电压输出范围 | 1.300 V – 1.600 V（分辨率 1 mV） |
+| IMU | BMI160 六轴（3轴加速度 + 3轴陀螺仪） |
 | 采样率 | 50 Hz（定时器同步） |
 | 推理运行时 | TFLite Micro |
+
+> **传感器说明：** Flex 传感器输出模拟电压信号，弯曲角度变化对应约 10–20 mV 的电压变化。传感器重复性误差约 ±5–15 mV，训练时建议对输入添加高斯噪声增强以提升鲁棒性。
 
 ---
 
@@ -101,7 +105,7 @@ Tospine_Model/
 - **数量**：4000 CSV 文件（4 类 × 1000 样本）
 - **采样率**：50 Hz
 - **时长**：100 点 = 2 秒窗口
-- **特征**：9 通道（3×FSR + 6×IMU）
+- **特征**：9 通道（3×Flex弯曲传感器 + 6×IMU）
 
 ---
 
@@ -131,18 +135,30 @@ python code/WSL\ pytorch版.py
 每个 CSV 文件需包含以下列（顺序不限）：
 
 ```
-time, fsr_left, fsr_right, fsr_spine, acc_x, acc_y, acc_z, gyr_x, gyr_y, gyr_z, label
+time, flex_left, flex_right, flex_back, acc_x, acc_y, acc_z, gyr_x, gyr_y, gyr_z, label
 ```
+
+| 列名 | 传感器来源 | 说明 |
+|------|-----------|------|
+| `flex_left` | 左肩 Flex 2.2 | 电压值（V），范围约 1.300–1.600 |
+| `flex_right` | 右肩 Flex 2.2 | 电压值（V），范围约 1.300–1.600 |
+| `flex_back` | 背部 Flex 4.5 | 电压值（V），范围约 1.300–1.600 |
+| `acc_x/y/z` | BMI160 加速度计 | 单位 g |
+| `gyr_x/y/z` | BMI160 陀螺仪 | 单位 °/s |
+| `label` | — | 0–3（4 分类） |
+
 - **采样率**：50 Hz
 - **标签**：0–3（4 分类）
 - **窗口**：100 点（2 秒）
+
+> ⚠️ **注意**：训练脚本中的 `SENSOR_COLS` 需与实际 CSV 列名一致。若硬件组输出的列名不同，修改脚本顶部的 `SENSOR_COLS` 列表即可，模型结构无需任何改动。
 
 ---
 
 ## 模型架构
 
 ```
-输入 (100, 9)          ← 2s 窗口 × 9 通道
+输入 (100, 9)          ← 2s 窗口 × 9 通道（3×Flex + 6×IMU）
   │
 Conv1D(16, k=5) + ReLU + MaxPool → (50, 16)
 Conv1D(32, k=3) + ReLU + MaxPool → (25, 32)
@@ -188,8 +204,16 @@ posture_model.pt       ← PyTorch 权重（本地微调备用）
 
 ### 步骤 3：数据预处理
 
-推理前需按 `posture_model.h` 内的 `norm_mean` / `norm_std` 对原始传感器数据做 Z-score 归一化：
+推理前需完成以下两步预处理：
 
+**① Flex 传感器通道归一化**（建议用训练集 min/max 线性映射）：
+```c
+// Flex 通道线性归一化到 [0, 1]
+// flex_min / flex_max 从训练数据统计得到，烧录为常量
+float flex_norm = (raw_voltage - flex_min[ch]) / (flex_max[ch] - flex_min[ch]);
+```
+
+**② Z-score 归一化**（全通道，使用 posture_model.h 内参数）：
 ```c
 // 预处理示例（9 通道）
 for (int i = 0; i < 9; i++) {
@@ -209,8 +233,8 @@ int predicted_class = argmax(output_probs);
 
 | Tag | 准确率 | TFLite 大小 | 说明 |
 |-----|--------|-----------|------|
-| v2.0 | 89.61% → **90%** | 22.4 KB | Conv 16/32/64，类别权重，LR 5e-4 |
-| v1.0 | ~89% | 13.9 KB | Conv 8/16/32，基线版本 |
+| v2.0 | 89.61% → **90%** | 22.4 KB | Conv 16/32/64，类别权重，LR 5e-4；传感器改为 Flex×3 + BMI160 |
+| v1.0 | ~89% | 13.9 KB | Conv 8/16/32，基线版本；FSR×3 + BMI160 |
 
 ---
 
